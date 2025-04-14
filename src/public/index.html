@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agente de Voz</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <h1>Asistente de Voz</h1>
+    <button id="startRecordButton">Iniciar Conversación</button>
+    
+    <div id="audioContainer">
+      <!-- Mensajes de audio se agregan dinámicamente acá -->
+      <div class="audio-message">
+        <span>Respuesta del Agente</span>
+        <audio id="respuesta" controls autoplay></audio>
+      </div>
+    </div>
+
+    <script type="module" src="./recorder.js"></script>
+  </body>
+</html>
