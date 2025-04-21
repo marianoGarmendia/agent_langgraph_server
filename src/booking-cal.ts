@@ -67,7 +67,7 @@ export const createbookingTool = tool(
     }
   },
   {
-    name: "create_booking_Tool",
+    name: "createbookingTool",
     description: "Crea una reserva en Cal",
     schema: z.object({
       name: z.string().describe("Nombre del asistente"),
@@ -137,7 +137,7 @@ export const getAvailabilityTool = tool(
     }
   },
   {
-    name: "get_availability_Tool",
+    name: "getAvailabilityTool",
     description:
       "Obtiene la disponibilidad de un evento en Cal para un rango de fechas, un dia en este caso",
     schema: z.object({

@@ -5,7 +5,10 @@
         "."
     ],
     "graphs": {
-        "agent": "./src/graph.ts:workflow"
+        "agent": "./src/graph.ts:workflow",
+        "naturgy": "./src/naturgy.ts:workflow",
+        "zentrum": "./src/zentrum.ts:workflow"
+
     },
     "env": "./.env"
 }

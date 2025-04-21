@@ -14,6 +14,7 @@ import {
   convertirAudioWebmAWav,
 } from "./procesing-voices/audio-transcription.js";
 import { processAudioElevenLabs } from "./procesing-voices/text-to-speech.js";
+// import { ensureToolCallsHaveResponses } from "./ensure-tool-response.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 console.log("filename: ", __filename);
@@ -42,6 +43,7 @@ const upload = multer({ storage });
 
 import { workflow } from "./graph";
 import { text } from "stream/consumers";
+import { HumanMessage } from "@langchain/core/messages";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -155,130 +157,187 @@ app.post("/agent", async (req, res) => {
 
 // })
 
+const threadLocks = new Map<string, boolean>();
+
 app.post("/v1/chat/completions", async (req, res) => {
-  console.log("agent eleven");
-  // console.dir(req.body, { depth: null });
+  const { messages, stream } = req.body;
+  const human = messages.at(-1);
+  if (human.role !== "user") {
+    res.write(
+      `event: error\ndata: ${JSON.stringify({
+        message: "El último mensaje debe ser del usuario",
+      })}\n\n`
+    );
+    res.write("data: [DONE]\n\n");
+    return;
+  }
 
-  const {
-    messages,
-    model = "gpt-4o",
-    temperature = 0.7,
-    max_tokens = 5000,
-    stream = false,
-    user_id,
-    elevenlabs_extra_body, // <- esto podés usarlo si querés meter lógica personalizada
-  } = req.body;
+  if (!stream) {
+    res.status(400).json({ error: "Solo soporta stream=true" });
+    return;
+  }
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
 
-  const human_message = messages[messages.length - 1].content as string;
-  console.log("Mensaje humano: " + human_message);
-  // console.log("Mensaje humano: " + messages[messages.length - 1]);
+  const heartbeat = setInterval(() => res.write(": ping\n\n"), 15000);
+  const thread_id = "1284";
+
+  if (threadLocks.get(thread_id)) {
+    clearInterval(heartbeat);
+    res.write(
+      `event: error\ndata: ${JSON.stringify({
+        message: "Espera un momento, estoy procesando información",
+      })}\n\n`
+    );
+    res.write("data: [DONE]\n\n");
+    return;
+  }
+  threadLocks.set(thread_id, true);
 
   try {
-    if (stream) {
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
+    // inyectar ToolMessages faltantes
+    const state = await workflow.getState({ configurable: { thread_id } });
+    const history = state.values.messages || [];
+    console.log("history: ", history);
 
-      const completionStream = await workflow.stream(
-        { messages: human_message },
-        { configurable: { thread_id: "5994" }, streamMode: "messages" }
-      );
+    // const checked = ensureToolCallsHaveResponses(history);
+    // const payload = [...checked, human];
 
-      const streamingDelay = 1000; // ms entre chunks
+    // obtener respuesta
+    const agentResp = await workflow.invoke(
+      { messages: [...history, human] },
+      { configurable: { thread_id } }
+    );
 
-      async function streamWaitMessage(res, chunk) {
-        
+    const reply =
+      agentResp.messages.at(-1)?.content || "No hay respuesta del agente";
 
-        const frase =
-          "Dame un momento por favor, estoy buscando propiedades según tus preferencias... ya casi termino, solo un momento por favor";
-        const palabras = frase.split(/(\s+|(?<=\w)(?=[.,]))/); // separa palabras y puntuación
+    // construir chunk
+    const id = Date.now().toString();
+    const created = Math.floor(Date.now() / 1000);
+    const chunk = {
+      id,
+      object: "chat.completion.chunk",
+      created,
+      model: "gpt-4-o",
+      choices: [
+        {
+          index: 0,
+          delta: { role: "assistant", content: reply },
+          finish_reason: "stop",
+        },
+      ],
+    };
 
-        const id = Date.now();
+    res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+    console.log("send a elevenlabs");
 
-        for (const palabra of palabras) {
-          const content = palabra;
-
-          const chunk_custom_graph = {
-            id: id,
-            object: "chat.completion.chunk",
-            created: "",
-            model: "gpt-4-o",
-            service_tier: "default",
-            system_fingerprint: "fp_18cc0f1fa0",
-            choices: [
-              {
-                index: 0,
-                delta: {
-                  content: content,
-                },
-                logprobs: null,
-                finish_reason: null,
-              },
-            ],
-          };
-
-          res.write(`data: ${JSON.stringify(chunk_custom_graph)}\n\n`);
-          await new Promise((r) => setTimeout(r, streamingDelay)); // simula el stream
-        }
-
-        res.write("data: [DONE]\n\n");
-        
-      }
-
+    console.dir(chunk, { depth: null, colors: true });
+    res.write("data: [DONE]\n\n");
+    // En tu handler de /chat/completions
+    req.on("close", (e) => {
+      console.log("[SSE] Cliente/proxy cerró la conexión");
+      console.log("[SSE] Close:", e);
       
-
-      for await (const chunk of completionStream) {
-          console.log(chunk[0].invalid_tool_calls.length);
-          
-        while(chunk[0].invalid_tool_calls.length > 0) {
-          await streamWaitMessage(res, chunk);
-        }
-        console.log("chunk: ", chunk[0].content);
-        console.log("chunk: ", chunk[0].invalid_tool_calls);
-        
-
-        const { id, content } = chunk[0];
-        const { ls_model_name } = chunk[1];
-        const chunk_custom_graph = {
-          id: id,
-          object: "chat.completion.chunk",
-          created: "",
-          model: ls_model_name,
-          service_tier: "default",
-          system_fingerprint: "fp_18cc0f1fa0",
-          choices: [
-            {
-              index: 0,
-              delta: {
-                content: content,
-              },
-              logprobs: null,
-              finish_reason: null,
-            },
-          ],
-        };
-
-        res.write(`data: ${JSON.stringify(chunk_custom_graph)}\n\n`);
-      }
-
-      res.write("data: [DONE]\n\n");
-      res.end();
-    } else {
-      const completion = await openai.chat.completions.create({
-        model,
-        messages,
-        temperature,
-        max_tokens,
-        user: user_id,
-      });
-
-      res.json(completion);
-    }
+    });
+    res.on("error", (err) => {
+      console.error("[SSE] Error en el stream:", err);
+    });
+    res.end();
   } catch (err) {
-    console.error("❌ Error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    res.write(
+      `event: error\ndata: ${JSON.stringify({ message: err.message })}\n\n`
+    );
+    res.write("data: [DONE]\n\n");
+    console.log("Error en /v1/chat/completions:", err);
+  } finally {
+    clearInterval(heartbeat);
+    threadLocks.set(thread_id, false);
+    res.end();
   }
 });
+
+//   const streamingDelay = 1000; // ms entre chunks
+
+//   async function streamWaitMessage(res, chunk) {
+
+//     const frase =
+//       "Dame un momento por favor, estoy buscando propiedades según tus preferencias... ya casi termino, solo un momento por favor";
+//     const palabras = frase.split(/(\s+|(?<=\w)(?=[.,]))/); // separa palabras y puntuación
+
+//     const id = Date.now();
+
+//     for (const palabra of palabras) {
+//       const content = palabra;
+
+//       const chunk_custom_graph = {
+//         id: id,
+//         object: "chat.completion.chunk",
+//         created: "",
+//         model: "gpt-4-o",
+//         service_tier: "default",
+//         system_fingerprint: "fp_18cc0f1fa0",
+//         choices: [
+//           {
+//             index: 0,
+//             delta: {
+//               content: content,
+//             },
+//             logprobs: null,
+//             finish_reason: null,
+//           },
+//         ],
+//       };
+
+//       res.write(`data: ${JSON.stringify(chunk_custom_graph)}\n\n`);
+//       await new Promise((r) => setTimeout(r, streamingDelay)); // simula el stream
+//     }
+
+//     res.write("data: [DONE]\n\n");
+
+//   }
+// ------------------------------------------------------------------
+//     for await (const chunk of completionStream) {
+//         console.log(chunk[0].invalid_tool_calls.length);
+
+//       const { id, content } = chunk[0];
+//       const { ls_model_name } = chunk[1];
+//   const chunk_custom_graph = {
+//     id: id,
+//     object: "chat.completion.chunk",
+//     created: "",
+//     model: ls_model_name,
+//     service_tier: "default",
+//     system_fingerprint: "fp_18cc0f1fa0",
+//     choices: [
+//       {
+//         index: 0,
+//         delta: {
+//           content: content,
+//         },
+//         logprobs: null,
+//         finish_reason: null,
+//       },
+//     ],
+//   };
+
+//       res.write(`data: ${JSON.stringify(chunk_custom_graph)}\n\n`);
+//     }
+
+//     res.write("data: [DONE]\n\n");
+//     res.end();
+//   } else {
+//     const completion = await openai.chat.completions.create({
+//       model,
+//       messages,
+//       temperature,
+//       max_tokens,
+//       user: user_id,
+//     });
+
+//     res.json(completion);
+// }
 
 // Iniciar el servidor
 app.listen(PORT, () => {

@@ -33,6 +33,7 @@
     "openai": "^4.89.0",
     "pdf-parse": "^1.1.1",
     "scrapybara": "^2.4.7",
+    "tsx": "^4.19.3",
     "uuid": "^10.0.0",
     "whisper-node": "^1.1.1"
   },

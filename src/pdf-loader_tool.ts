@@ -26,10 +26,8 @@ const loader = new PDFLoader(rutaArchivo);
 const docs = await loader.load();
 
 const embeddings = new OpenAIEmbeddings({
-
   model: "text-embedding-3-small",
 
-  
   apiKey: process.env.OPENAI_API_KEY,
 });
 
@@ -57,8 +55,8 @@ export const pdfTool = tool(
       k: 5,
     });
     const docsFound = await retriever.invoke(query);
-    console.dir( docsFound, {depth: null});
-    
+    console.dir(docsFound, { depth: null });
+
     const content = docsFound.map((doc) => doc.pageContent);
     const texto = content.join(" ");
     return texto;
@@ -233,6 +231,8 @@ const getPisos = tool(
   }
 );
 
+
+
 export const getPisos2 = tool(
   async ({
     habitaciones,
@@ -242,136 +242,121 @@ export const getPisos2 = tool(
     superficie_total,
     tipo_operacion,
   }) => {
-   
+    try {
+      // Validación de zona
+      if (!zona || zona.trim().length < 2) {
+        return "Por favor, proporciona una zona válida con al menos 2 caracteres.";
+      }
 
-    const response = await fetch(url);
-    if (!response.ok) {
-      return "Hubo algun error al consultar las propieadades, por favor intente nuevamente.";
-    }
+      // Validación precio
+      const precioInput = Number(precio_aproximado);
+      if (isNaN(precioInput)) {
+        return "El precio aproximado debe ser un número válido.";
+      }
+      const precioMin = precioInput * 0.9;
+      const precioMax = precioInput * 1.1;
 
-    const pisos = await response.json();
+      // Validación de superficie
+      const superficieInput = superficie_total
+        ? Number(superficie_total)
+        : null;
+      const superficieMin = superficieInput ? superficieInput * 0.7 : null;
+      const superficieMax = superficieInput ? superficieInput * 1.2 : null;
 
-    // Primero filtramos las propiedades por estado y tipo_operacion
-    const pisos_filtrables = pisos
-      .map((p) => p.PRODUCT_PROPS)
-      .filter((p) => {
-        const estado_ok = p.estado?.toLowerCase() !== "no disponible";
-        const operacion_ok =
-          p.tipo_operacion?.toLowerCase() === tipo_operacion.toLowerCase();
-        return estado_ok && operacion_ok;
+      const response = await fetch(url);
+      if (!response.ok) {
+        return "Hubo un error al consultar las propiedades. Por favor, intenta nuevamente.";
+      }
+
+      const pisos = await response.json();
+
+      const pisos_filtrables = pisos
+        .map((p) => p.PRODUCT_PROPS)
+        .filter((p) => {
+          const estado_ok = p.estado?.toLowerCase() !== "no disponible";
+          const operacion_ok =
+            p.tipo_operacion?.toLowerCase() === tipo_operacion.toLowerCase();
+          return estado_ok && operacion_ok;
+        });
+
+      const pisosPuntuados = pisos_filtrables.map((piso) => {
+        let score = 0;
+
+        // Habitaciones
+        if (!habitaciones) {
+          score++;
+        } else {
+          const pedidas = Number(habitaciones.trim());
+          const disponibles = Number(piso.dormitorios?.trim());
+          if (disponibles === pedidas || disponibles === pedidas + 1) score++;
+        }
+
+        // Zona
+        const zonaInput = zona.toLowerCase().trim();
+        const ubicaciones = [piso.zona, piso.ciudad, piso.provincia, piso.pais];
+        if (ubicaciones.some((u) => u?.toLowerCase().includes(zonaInput)))
+          score++;
+
+        // Piscina
+        if (!piscina) {
+          score++;
+        } else if (piscina === "si" ? piso.piscina === "1" : true) {
+          score++;
+        }
+
+        // Precio
+        let precio = 0;
+        try {
+          const precioStr = piso.precio?.toString().replace(/\s/g, "") || "";
+          precio = Number(precioStr);
+        } catch {}
+        if (precio >= precioMin && precio <= precioMax) score++;
+
+        // Superficie
+        const sup = piso.m2constr ? Number(piso.m2constr.toString().trim()) : 0;
+        if (
+          !superficie_total ||
+          (sup >= superficieMin! && sup <= superficieMax!)
+        ) {
+          score++;
+        }
+
+        return { piso, score };
       });
 
-   
+      for (let minScore = 5; minScore >= 2; minScore--) {
+        const matches = pisosPuntuados
+          .filter(({ score }) => score === minScore)
+          .map(({ piso }) => piso);
 
-    const precioInput = Number(precio_aproximado);
-    const precioMin = precioInput * 0.9;
-    const precioMax = precioInput * 1.1;
-
-    const superficieInput = superficie_total ? Number(superficie_total) : null;
-    const superficieMin = superficieInput ? superficieInput * 0.9 : null;
-    const superficieMax = superficieInput ? superficieInput * 1.1 : null;
-
-    const pisosPuntuados = pisos_filtrables.map((piso) => {
-      let score = 0;
-
-      // Habitaciones
-      if (!habitaciones) {
-        score++;
-      } else {
-        const pedidas = Number(habitaciones.trim());
-        const disponibles = Number(piso.dormitorios?.trim());
-
-        if (disponibles === pedidas || disponibles === pedidas + 1) {
-          score++;
+        if (matches.length > 0) {
+          return matches
+            .map((p) => {
+              return `
+            Ciudad: ${p.ciudad || "Sin dato"}
+            Ubicación: ${p.ubicacion || p.zona || "Sin dato"}
+            Dormitorios: ${p.dormitorios || "Sin dato"}
+            Baños: ${p.banios || "Sin dato"}
+            Metros construidos: ${p.m2constr?.trim() || "Sin dato"} m²
+            Antigüedad: ${p.antiguedad || "Sin dato"}
+            Precio: ${p.precio ? `${p.precio} €` : "Sin dato"}
+            Descripción: ${p.descripcion?.slice(0, 200).trim() || "Sin descripción"}...
+            Características: ${
+                Array.isArray(p.caracteristicas)
+                  ? p.caracteristicas.join(", ")
+                  : "Sin dato"
+              }
+              `.trim();
+            })
+            .join("\n\n---------------------\n\n");
         }
       }
 
-      const zonaInput = zona.toLowerCase().trim();
-
-      const ubicaciones = [piso.zona, piso.ciudad, piso.provincia, piso.pais];
-
-      const zona_ok = ubicaciones.some((ubicacion) =>
-        ubicacion?.toLowerCase().includes(zonaInput)
-      );
-
-      if (zona_ok) score++;
-
-      // Piscina
-      if (!piscina) {
-        score++;
-      } else if (piscina.toLowerCase() === "si" ? piso.piscina === "1" : true) {
-        score++;
-      }
-
-      // Precio (obligatorio)
-      let precio = 0;
-      if (piso.precio !== undefined && piso.precio !== null) {
-        try {
-          const precioStr = piso.precio.toString().replace(/\s/g, "");
-          precio = Number(precioStr);
-        } catch {
-          precio = 0;
-        }
-      }
-      const precio_ok = precio >= precioMin && precio <= precioMax;
-      if (precio_ok) score++;
-
-      const superficie = piso.m2constr
-        ? Number(piso.m2constr.toString().trim())
-        : 0;
-
-      if (!superficie_total) {
-        score++;
-      } else {
-        const superficieInput = Number(superficie_total);
-        const superficieMin = superficieInput * 0.7;
-        const superficieMax = superficieInput * 1.2;
-
-        const superficie = piso.m2constr
-          ? Number(piso.m2constr.toString().trim())
-          : 0;
-
-        if (superficie >= superficieMin && superficie <= superficieMax) {
-          score++;
-        }
-      }
-
-      return { piso, score };
-    });
-
-    for (let minScore = 5; minScore >= 2; minScore--) {
-      const matches = pisosPuntuados
-        .filter(({ score }) => score === minScore)
-        .map(({ piso }) => piso);
-
-      if (matches.length > 0) {
-        const resumen = matches.map((p) => {
-          return `
-         Ciudad: ${p.ciudad || "Sin dato"}
-         Ubicación: ${p.ubicacion || p.zona || "Sin dato"}
-         Dormitorios: ${p.dormitorios || "Sin dato"}
-         Baños: ${p.banios || "Sin dato"}
-         Metros construidos: ${p.m2constr?.trim() || "Sin dato"} m²
-         Antigüedad: ${p.antiguedad || "Sin dato"}
-         Precio: ${p.precio ? `${p.precio} €` : "Sin dato"}
-         Descripción: ${
-           p.descripcion?.slice(0, 200).trim() || "Sin descripción"
-         }...
-         Características: ${
-           Array.isArray(p.caracteristicas)
-             ? p.caracteristicas.join(", ")
-             : "Sin dato"
-         }
-            `.trim();
-        });
-        console.log("propiedades encontradas: ", resumen.length);
-
-        return resumen.join("\n\n---------------------\n\n");
-      }
+      return "Lamentablemente no hay propiedades que cumplan con los requisitos que busca.";
+    } catch (error) {
+      console.error("Error en getPisos2:", error);
+      return "Ocurrió un error interno al procesar la búsqueda de propiedades.";
     }
-
-    // Si no encontró ningún match con score >= 2
-    return "Lamentablemente no hay propiedades que cumplan con los requisitos que busca.";
   },
   {
     name: "Obtener_pisos_en_venta_dos",
