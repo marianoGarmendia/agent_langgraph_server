@@ -7,6 +7,12 @@ import {
   ToolMessage,
   type BaseMessageLike,
 } from "@langchain/core/messages";
+import {
+  ActionRequest,
+  HumanInterruptConfig,
+  HumanInterrupt,
+  HumanResponse,
+} from "@langchain/langgraph/prebuilt";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { ChatOpenAI } from "@langchain/openai";
@@ -33,7 +39,7 @@ import {
 } from "./pdf-loader_tool";
 import { encode } from "gpt-3-encoder";
 import { createbookingTool, getAvailabilityTool } from "./booking-cal";
-
+import { ensureToolCallsHaveResponses } from "./ensure-tool-response";
 import { getUniversalFaq, noticias_y_tendencias } from "./firecrawl";
 
 import { contexts } from "./contexts";
@@ -60,6 +66,7 @@ const stateAnnotation = MessagesAnnotation;
 const newState = Annotation.Root({
   ...stateAnnotation.spec,
   summary: Annotation<string>,
+  interruptResponse: Annotation<string>,
 });
 
 // export const llmGroq = new ChatGroq({
@@ -72,7 +79,7 @@ const newState = Annotation.Root({
 // }).bindTools(tools);
 
 export const model = new ChatOpenAI({
-  model: "gpt-4o-mini",
+  model: "gpt-4o",
   streaming: false,
   apiKey: process.env.OPENAI_API_KEY,
   temperature: 0,
@@ -111,7 +118,7 @@ Tu estilo es cálido, profesional y sobre todo **persuasivo pero no invasivo**. 
 
 ### 🧱 Reglas de conversación
 
-- **No hagas preguntas múltiples**. Preguntá una cosa por vez: primero la zona, después el presupuesto, después habitaciones, etc.
+- **No hagas preguntas múltiples**. Preguntá una cosa por vez: primero la zona, después el presupuesto, después habitaciones, despues metros cuadrados , piscina etc.
 - **No repitas lo que el usuario ya dijo**. Escuchá con atención y respondé directo al punto.
 - **No inventes información**. Si algo no lo sabés, ofrecé buscarlo o contactar a un asesor.
 - **No agendes visitas para propiedades en alquiler.**
@@ -130,6 +137,20 @@ Tu estilo es cálido, profesional y sobre todo **persuasivo pero no invasivo**. 
 - tavily_search: para consultar información del clima, actividades o puntos de interés de una zona.
 
 ---
+
+### REGLAS PARA RECOPILACION DE INFORMACION PARA HERRAMIENTAS
+- Para la herramienta **Obtener_pisos_en_venta_dos**:
+  
+    - **Habitaciones**: 1, 2, 3 o más.
+    - **Precio aproximado**: un rango de precios 
+    - **Zona**: nombre de la zona o barrio (ej: Gracia, Barcelona).
+    - **Superficie total**: en metros cuadrados (ej: entre 50 y 100 m2).
+    - **Piscina**: si o no.
+    - **Tipo de operación**: venta o alquiler.
+
+    - Asegurate de ir recopilando de a un valor por vez, y no todos juntos
+    - Si al usuario le da lo mismo una caracteristica, o no tiene preferencia, le das valor "sin asignar"
+    - Una vez que tengas todos los valores continúa-
 
 ### ℹ️ Información adicional
 
@@ -151,11 +172,11 @@ Tu estilo es cálido, profesional y sobre todo **persuasivo pero no invasivo**. 
   const numeroDeTokens = tokens.length;
 
   // console.dir( state.messages[state.messages.length - 1], {depth: null});
-  
-  console.log(`Número de tokens: ${numeroDeTokens}`);
-  
-  console.log("------------");
-  
+
+  // console.log(`Número de tokens: ${numeroDeTokens}`);
+
+  // console.log("------------");
+
   return { messages: [...messages, response] };
 
   // console.log(messages, response);
@@ -177,57 +198,145 @@ function shouldContinue(state: typeof newState.State) {
   // Otherwise, we stop (reply to the user)
 }
 
+const humanNode = (lastMessage) => {
+  
+  const toolArgs = lastMessage.tool_calls[0].args as {
+    habitaciones: string | null;
+    precio_aproximado: string;
+    zona: string;
+    superficie_total: string | null;
+    piscina: "si" | "no" | null;
+    tipo_operacion: "venta" | "alquiler";
+  };
+
+  const {
+    habitaciones,
+    precio_aproximado,
+    zona,
+    piscina,
+    superficie_total,
+    tipo_operacion,
+  } = toolArgs;
+
+  // Define the interrupt request
+  const actionRequest: ActionRequest = {
+    action: "Confirma la búsqueda",
+    args: toolArgs,
+  };
+
+  const description = `Por favor, confirma la búsqueda de propiedades con los siguientes parámetros: ${JSON.stringify(
+    {
+      habitaciones,
+      precio_aproximado,
+      zona,
+      piscina,
+      superficie_total,
+      tipo_operacion,
+    }
+  )}`;
+
+  const interruptConfig: HumanInterruptConfig = {
+    allow_ignore: false, // Allow the user to `ignore` the interrupt
+    allow_respond: false, // Allow the user to `respond` to the interrupt
+    allow_edit: true, // Allow the user to `edit` the interrupt's args
+    allow_accept: true, // Allow the user to `accept` the interrupt's args
+  };
+
+  const request: HumanInterrupt = {
+    action_request: actionRequest,
+    config: interruptConfig,
+    description,
+  };
+
+  const humanResponse = interrupt<HumanInterrupt[], HumanResponse[]>([
+    request,
+  ])[0];
+  console.log("request: ", request);
+
+  console.log("humanResponse: ", humanResponse);
+
+  if (humanResponse.type === "response") {
+    const message = `User responded with: ${humanResponse.args}`;
+    return { interruptResponse: message, humanResponse: humanResponse.args };
+  } else if (humanResponse.type === "accept") {
+    const message = `User accepted with: ${JSON.stringify(humanResponse.args)}`;
+    return { interruptResponse: message, humanResponse: humanResponse };
+    
+  } else if (humanResponse.type === "edit") {
+    const message = `User edited with: ${JSON.stringify(humanResponse.args)}`;
+    return { interruptResponse: message, humanResponse: humanResponse.args };
+
+  } else if (humanResponse.type === "ignore") {
+    const message = "User ignored interrupt.";
+    return { interruptResponse: message, humanResponse: humanResponse };
+
+  }
+
+  return {
+    interruptResponse:
+      "Unknown interrupt response type: " + JSON.stringify(humanResponse),
+  };
+};
+
+interface pisosToolArgs {
+  habitaciones: string | null;
+  precio_aproximado: string;
+  zona: string;
+  superficie_total: string | null;
+  piscina: "si" | "no" | null;
+  tipo_operacion: "venta" | "alquiler";
+}
+
 const toolNodo = async (state: typeof newState.State) => {
   const { messages } = state;
 
   const lastMessage = messages[messages.length - 1] as AIMessage;
   console.log("toolNodo");
   console.log("-----------------------");
-  console.log(lastMessage);
-  console.log(lastMessage?.tool_calls);
+  // console.log(lastMessage);
+  // console.log(lastMessage?.tool_calls);
 
   let toolMessage: BaseMessageLike = "un tool message" as BaseMessageLike;
   if (lastMessage?.tool_calls?.length) {
     const toolName = lastMessage.tool_calls[0].name;
-    const toolArgs = lastMessage.tool_calls[0].args as {
-      habitaciones: string | null;
-      precio_aproximado: string;
-      zona: string;
-      superficie_total: string | null;
-      piscina: "si" | "no" | null;
-      tipo_operacion: "venta" | "alquiler";
-    } & { query: string } & { startTime: string; endTime: string; } &  { name: string; start: string; email: string; } ;
+    const toolArgs = lastMessage.tool_calls[0].args as pisosToolArgs & { query: string } & { startTime: string; endTime: string } & {
+      name: string;
+      start: string;
+      email: string;
+    };
     let tool_call_id = lastMessage.tool_calls[0].id as string;
 
     if (toolName === "Obtener_pisos_en_venta_dos") {
-      const response = await getPisos2.invoke(toolArgs);
-      if (typeof response !== "string") {
-        toolMessage = new ToolMessage(
-          "Hubo un problema al consultar las propiedades intentemoslo nuevamente",
-          tool_call_id,
-          "Obtener_pisos_en_venta_dos"
-        );
-      } else {
-        toolMessage = new ToolMessage(
-          response,
-          tool_call_id,
-          "Obtener_pisos_en_venta_dos"
-        );
+      const responseInterrupt = humanNode(lastMessage);
+      if(responseInterrupt.humanResponse && typeof responseInterrupt.humanResponse !== 'string' && responseInterrupt.humanResponse.args){
+        const toolArgsInterrupt = responseInterrupt.humanResponse.args as pisosToolArgs 
+        const response = await getPisos2.invoke(toolArgsInterrupt);
+        if (typeof response !== "string") {
+          toolMessage = new ToolMessage(
+            "Hubo un problema al consultar las propiedades intentemoslo nuevamente",
+            tool_call_id,
+            "Obtener_pisos_en_venta_dos"
+          );
+        } else {
+          toolMessage = new ToolMessage(
+            response,
+            tool_call_id,
+            "Obtener_pisos_en_venta_dos"
+          );
+        }
       }
+      
+
+      
     } else if (toolName === "universal_info_2025") {
       const res = await pdfTool.invoke(toolArgs);
       toolMessage = new ToolMessage(res, tool_call_id, "universal_info_2025");
-    }else if(toolName === "get_availability_Tool") {
+    } else if (toolName === "get_availability_Tool") {
       const res = await getAvailabilityTool.invoke(toolArgs);
       toolMessage = new ToolMessage(res, tool_call_id, "get_availability_Tool");
-    }
-    else if (toolName === "create_booking_tool") {
+    } else if (toolName === "create_booking_tool") {
       const res = await createbookingTool.invoke(toolArgs);
-      toolMessage = new ToolMessage(
-        res,
-        tool_call_id,
-        "create_booking_tool"
-      );
+      toolMessage = new ToolMessage(res, tool_call_id, "create_booking_tool");
     }
   } else {
     return { messages };
@@ -300,12 +409,14 @@ const delete_messages = async (state: typeof newState.State) => {
       summary_text = summary_message.content as string;
     }
 
+    const mssageReduced = messages.slice(0, -3).map((message) => {
+      return new RemoveMessage({ id: message.id as string });
+    });
+
+    const messagesChecked = ensureToolCallsHaveResponses(mssageReduced);
+
     return {
-      messages: [
-        ...messages.slice(0, -3).map((message) => {
-          return new RemoveMessage({ id: message.id as string });
-        }),
-      ],
+      messages: [...messagesChecked],
       summary: summary_text,
     };
   }
@@ -320,9 +431,6 @@ graph
   .addEdge("__start__", "agent")
   .addConditionalEdges("agent", shouldContinue)
   .addEdge("tools", "agent");
-
-// .addEdge("agent", "delete_messages")
-// .addEdge("delete_messages", "__end__")
 
 const checkpointer = new MemorySaver();
 
@@ -344,16 +452,15 @@ let config = { configurable: { thread_id: "123" } };
 // await workflow.stream({messages: [new HumanMessage("Mi dni es 32999482, tipo dni")]}, {configurable: {thread_id: "1563"} , streamMode: "messages" });
 
 // for await (const message of response) {
-  
+
 //   // console.log(message);
 //   // console.log(message.content);
 //   // console.log(message.tool_calls);
 
-
 //   console.dir({
 //     event: message.event,
 //     messages: message.data,
-    
+
 //   },{
 //     depth: 3,
 //   });

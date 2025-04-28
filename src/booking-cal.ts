@@ -4,6 +4,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import { empresa } from "./graph";
 
 const CAL_API_KEY = process.env.CAL_API_KEY;
+const CAL_ZENTRUM_API_KEY = process.env.CAL_ZENTRUM_API_KEY;
 
 
 

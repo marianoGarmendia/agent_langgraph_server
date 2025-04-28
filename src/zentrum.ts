@@ -11,6 +11,7 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { ChatOpenAI } from "@langchain/openai";
 import { TavilySearchResults } from "@langchain/community/tools/tavily_search";
+import { humanNode } from "./semiusados-zentrum/human-node/human-node";
 
 import {
   START,
@@ -33,41 +34,127 @@ import {
   getPisos2,
 } from "./pdf-loader_tool";
 import { encode } from "gpt-3-encoder";
-import { createbookingTool, getAvailabilityTool } from "./booking-cal";
-
+import {
+  createbookingTool,
+  getAvailabilityTool,
+} from "./semiusados-zentrum/tools/booking_cal";
+import { autoSchema } from "./semiusados-zentrum/types/autoSchema";
+import { buscarAutos } from "./semiusados-zentrum/findCars";
 import { getUniversalFaq, noticias_y_tendencias } from "./firecrawl";
 import { TavilySearchAPIRetriever } from "@langchain/community/retrievers/tavily_search_api";
-
+import { semiUsadosZentrum } from "./semiusados-zentrum/allcars";
+import { zentrum_info_tool } from "./semiusados-zentrum/tools/rag_zentrum";
 import { contexts } from "./contexts";
 import { info, log } from "console";
 import { ToolCall } from "openai/resources/beta/threads/runs/steps.mjs";
 
-const newState = MessagesAnnotation;
+const stateAnnotation = MessagesAnnotation;
+
+const newState = Annotation.Root({
+  ...stateAnnotation.spec,
+
+  interruptResponse: Annotation<string>,
+});
+
+const tavilySearch = new TavilySearchAPIRetriever({
+  apiKey: process.env.TAVILY_API_KEY as string,
+  k: 5,
+  searchDepth: "advanced",
+  kwargs: {
+    lang: "es",
+    country: "CL",
+  },
+});
+
+type AutoInput = z.infer<typeof autoSchema>;
 
 const get_cars = tool(
-  async ({ query }, config) => {
-    const tavilySearch = new TavilySearchResults({
-      apiKey: process.env.TAVILY_API_KEY,
-     
+  async (
+    { modelo, combustible, transmision, anio, precio_contado, query },
+    config
+  ) => {
+    // const state = await workflow.getState({
+    //   configurable: { thread_id: config.configurable.thread_id },
+    // });
 
-      maxResults: 5,
-    });
+    // const { messages } = state.values;
+    // const lastMessage = messages[messages.length - 1] as AIMessage;
 
-    const prompt = `Busca en algun sitio web lo siguiente: query: ${query}. `;
+    // const responseInterrupt = humanNode(lastMessage, "zentrumSearch");
+
+    // if(responseInterrupt.humanResponse && typeof responseInterrupt.humanResponse !== 'string' && responseInterrupt.humanResponse.args){
+    //   const toolArgsInterrupt = responseInterrupt.humanResponse.args as AutoInput;
+    //   const autosEncontrados = buscarAutos(
+    //     toolArgsInterrupt,
+    //     semiUsadosZentrum
+    //   );
+
+    const autosEncontrados = buscarAutos(
+      { modelo, combustible, transmision, anio, precio_contado },
+      semiUsadosZentrum
+    );
+    if (!query) query = "No hay consulta del cliente";
+    const primerosCincoAutos = autosEncontrados.slice(0, 5);
+
+    console.log("autos encontrados");
+
+    console.dir(primerosCincoAutos, { depth: null });
+
+    const prompt = `Los autos encontrados segun el criterio de siguiente cirterio de búsqueda: modelo: ${modelo} combustible: ${combustible} , Transmision: ${transmision},año ${anio}, 
+    precio: ${precio_contado?.toString()} 
+    
+    son: ${JSON.stringify(primerosCincoAutos)}.
+    
+    Por favor analiza los autos encontrados y selecciona el que consideres más relevante para el cliente.
+    Además el cliente ha realizado la siguiente consulta: ${query}.
+
+    de ser necesario utiliza la herramienta: "tavily_search_result" para buscar en internet información adicional sobre el auto seleccionado y la consulta técnica del cliente.
+    responde con un mensaje estructurado de buena manera para pasarlo al siguiente nodo de evaluacion por otro modelo llm.`;
+
+    const model = new ChatOpenAI({
+      model: "gpt-4o",
+      apiKey: process.env.OPENAI_API_KEY,
+      temperature: 0,
+    }).bindTools([tavilySearch]);
     try {
-      const response = await tavilySearch.invoke(prompt);
-      log("response: ", response);
-      return response;
+      const response = await model.invoke(prompt);
+      if (!response)
+        return "Estamos teniendo problemas para encontrar autos, por favor intentalo nuevamente mas tarde";
+      return response.content as string;
     } catch (error) {
-      console.error("Error al buscar en el sitio web:", error);
-      throw new Error("Error al buscar en el sitio web de zentrum");
+      console.error("Error al buscar autos:", error);
+      throw new Error("Error al buscar autos");
     }
   },
+
   {
     name: "Catalogo_de_Vehiculos",
-    description: `Accede a la pagina web de datos actualizada de vehículos disponibles en Seminuevos Zentrum, incluyendo detalles como marca, modelo, año, kilometraje, precio y características específicas.`,
+    description: `Busca en la base de datos de vehículos seminuevos y devuelve los resultados más relevantes según los criterios proporcionados.`,
     schema: z.object({
-      query: z.string(),
+      modelo: z
+        .string()
+        .describe("Modelo del vehículo"),
+      combustible: z
+        .enum(["Gasolina", "Diesel", "Eléctrico"])
+        .describe(
+          "Tipo de combustible del vehículo (Gasolina, Diesel o Eléctrico)"
+        ),
+      transmision: z
+        .string()
+        .describe("Tipo de transmisión del vehículo"),
+      anio: z
+        .number()
+        .int()
+        .describe("Año del vehículo"),
+      precio_contado: z
+        .number()
+        .int()
+        .describe("Precio de contado aproximado del vehículo"),
+      query: z
+        .string()
+        .describe(
+          "Consulta o requerimiento técnico del cliente sobre el vehículo"
+        ),
     }),
   }
 );
@@ -81,9 +168,16 @@ const simulacion_de_credito = tool(
       temperature: 0,
     });
 
-    const prompt = `Simula un credito para un auto de ${valor_vehiculo} con un monto a financiar de ${monto_a_financiar} y ${cuotas} cuotas.`;
+    const prompt = `Simula un credito para un auto de ${valor_vehiculo} con un monto a financiar de ${monto_a_financiar} y ${cuotas} cuotas.
+     con una tasa referencial de 1,74. 
+     En la respuesta incluye la cuota estimada, el monto total a pagar y el monto de intereses.
+     aclara abajo lo siguiente: *Los cálculos son referenciales y pueden no coincidir con los reales.
+      Calculado con una tasa referencial de 1,74.      
+    `;
     try {
       const response = await model.invoke(prompt);
+      if (!response)
+        return "No se pudo realizar la simulacion del credito, intentalo nuevamente";
       return response.content as string;
     } catch (error) {
       console.error("Error al simular el credito:", error);
@@ -92,11 +186,18 @@ const simulacion_de_credito = tool(
   },
   {
     name: "Simulador_de_Credito",
-    description: `Ofrece a los clientes la posibilidad de simular opciones de financiamiento, calculando cuotas mensuales estimadas según el monto a financiar, número de cuotas y tasa de interés referencial.`,
+    description: `Ofrece a los clientes la posibilidad de simular opciones de financiamiento, calculando cuotas mensuales estimadas según el monto a financiar, número de cuotas y tasa de interés referencial. *Los cálculos son referenciales y pueden no coincidir con los reales.
+Calculado con una tasa referencial de 1,74.`,
     schema: z.object({
-      valor_vehiculo: z.string(),
-      monto_a_financiar: z.string(),
-      cuotas: z.string(),
+      valor_vehiculo: z
+        .string()
+        .describe("Valor del vehículo para la simulacion del credito"),
+      monto_a_financiar: z
+        .string()
+        .describe("Monto a financiar para la simulacion del credito"),
+      cuotas: z
+        .enum(["6", "12", "24", "48"])
+        .describe("Cantidad de cuotas para la simulacion del credito"),
     }),
   }
 );
@@ -106,6 +207,7 @@ const tools = [
   simulacion_de_credito,
   getAvailabilityTool,
   createbookingTool,
+  zentrum_info_tool,
 ];
 
 export const model = new ChatOpenAI({
@@ -128,98 +230,133 @@ async function callModel(state: typeof newState.State, config: any) {
 
   const systemsMessage = new SystemMessage(
     `   
-     🎯 System Prompt: Agente de Ventas de Vehículos Seminuevos
-Eres un agente virtual especializado en vehículos seminuevos de marcas como Audi, Volkswagen, Skoda, entre otras. Tu objetivo es asistir a los usuarios en la búsqueda, simulación de crédito, pruebas de manejo y cotización de sus vehículos.
+    # 🎯 System Prompt: Agente de Ventas de Vehículos Seminuevos
 
-🧰 Herramientas Disponibles
-get_cars
+Eres un **Agente de IA especializado en vehículos seminuevos** de marcas como Audi, Volkswagen, Skoda, entre otras.
 
-Descripción: Accede al catálogo actualizado de vehículos disponibles, incluyendo marca, modelo, año, precio y kilometraje. y le muestra al ususario opciones
+Tu objetivo es **asistir al cliente** en:
 
-Cuándo usar: Cuando el cliente solicita ver autos disponibles o tiene preferencias específicas.
+- Búsqueda de un vehículo para comprar
+- Simulación de crédito
+- Cotización de su vehículo en parte de pago o venta
+- Coordinación de visitas a la agencia Zentrum
 
-simulacion_de_credito
+---
 
-Descripción: Calcula cuotas mensuales estimadas en base al valor del vehículo, monto a financiar y cantidad de cuotas.
+## 🛠 Herramientas Disponibles
 
-Cuándo usar: Cuando el cliente desea financiar un vehículo.
+### 'get_cars'
+- **Uso:** Cuando el cliente pide ver autos o tiene preferencias específicas.
+- **Descripción:** Consulta el catálogo actualizado (marca, modelo, año, precio, kilometraje) y ofrece opciones.
+- **Parámetros:**
+  - modelo: string (modelo del vehículo)
+  - combustible: string (tipo de combustible)
+  - transmision: string (tipo de transmisión)
+  - anio: number (año del vehículo)
+  - precio_contado: number (precio contado)
+  - query: string (consulta o comentario del cliente)
+  
 
-getAvailabilityTool
+---
 
-Descripción: Consulta disponibilidad para agendar una prueba de manejo o una visita para cotizar el vehículo del cliente.
+### simulacion_de_credito
+- **Uso:** Cuando el cliente desea simular un plan de financiamiento.
+- **Descripción:** Calcula el valor de cuotas según el monto y plazo deseado.
+- **Parámetros:**
+  - valor_vehiculo: string (valor total del vehículo)
+  - monto_a_financiar: string (monto que desea financiar)
+  - cuotas: enum (6, 12, 24, 48)
 
-Cuándo usar: Siempre antes de intentar agendar una visita o prueba de manejo.
+---
 
-createbookingTool
+### Obtener_disponibilidad_de_turnos
+- **Uso:** Cuando se quiere coordinar una visita para ver o tasar un auto.
+- **Descripción:** Consulta disponibilidad de horarios.
+- **Parámetros:**
+  - name: string (nombre del cliente)
+  - start: string (fecha y hora solicitada)
+  - email: string (email del cliente)
 
-Descripción: Agenda una cita (prueba de manejo o visita para cotización) en el horario disponible seleccionado.
+---
 
-Cuándo usar: Una vez que se confirma la disponibilidad con getAvailabilityTool.
+### createbookingTool
+- **Uso:**
+  - Para agendar visitas para ver autos
+  - Para agendar visitas de tasación
+- **Descripción:** Agenda citas en la agencia Zentrum.
+- **Parámetros:**
+  - 
+  name: string (nombre del cliente)
+  - start: string (fecha y hora confirmada)
+  - email: string (email del cliente)
 
-👋 Inicio de Conversación
-Saluda de forma amigable, ofrece ayuda y explica brevemente que puedes:
+---
 
-Mostrar opciones de vehículos seminuevos.
+### REGLA PARA TODAS LAS HERRAMIENTAS
+**A los paraemtros que no tengas valores ingresados por el usuario le asignas null**
 
-Simular opciones de crédito.
+## 📏 Reglas de Uso de Herramientas
 
-Coordinar pruebas de manejo.
+- Usa createbookingTool solo si ya confirmaste disponibilidad con 'Obtener_disponibilidad_de_turnos'.
+- No llames a 'Obtener_disponibilidad_de_turnos' si no vas a agendar después.
+- No pidas todos los datos de una sola vez: pregunta uno a uno.
+- Usa herramientas solo si tienes todos los datos necesarios.
+- No llames herramientas innecesariamente.
 
-Agendar una visita para cotizar su vehículo.
+---
 
-📌 Procedimiento para Simular Crédito
-Pregunta por:
+## 🗣️ Reglas de Conversación
 
-Valor del vehículo
+- Tono **amigable, profesional y claro**.
+- Sin jergas técnicas.
+- Siempre preguntar si falta información, no asumir.
+- Personalizar respuestas, evitar plantillas automáticas.
+- Sé breve, directo y positivo.
+- Nunca dar información negativa de autos ni de la empresa.
+- Buscar siempre una solución o alternativa.
+- Ser persuasivo para concretar citas o ventas.
 
-Monto a financiar
+---
 
-Número de cuotas
+## 🧩 Flujo de Conversación
 
-Usa simulacion_de_credito con esos datos.
+1. **Saludo Inicial:**
+   > "Hola, soy Zen, el Agente IA de Seminuevos Zentrum. ¿En qué puedo ayudarte hoy?"
 
-Devuelve:
+2. **Recibir consulta.**
 
-Cuota mensual estimada
+3. **Evaluar y decidir:**
+   - Buscar autos ➔ 'get_cars'
+   - Simular crédito ➔ 'simulacion_de_credito'
+   - Coordinar visita ➔ Consultar disponibilidad ➔ Agendar cita
+   - Cotizar vehículo ➔ Consultar disponibilidad ➔ Agendar cita
 
-Condiciones adicionales (si aplica)
+---
 
-💬 Ejemplo:
+## 💬 Ejemplos de Conversación
 
-Cliente: "Quiero financiar un vehículo de $15,000,000 en 36 cuotas."
+**Cliente:** "Quiero financiar un vehículo de $15,000,000 en 36 cuotas."  
+**Agente:** "Perfecto. ¿Deseas financiar el total o solo una parte? Así puedo calcular mejor tu cuota."
 
-Agente: "Perfecto. ¿Desea financiar el total o una parte? Con eso puedo estimar su cuota mensual."
+---
 
-🧪 Procedimiento para Prueba de Manejo
-Pregunta si desea coordinar una prueba de manejo.
+**Cliente:** "Me gustaría probar el Audi Q5 antes de comprarlo."  
+**Agente:** "¡Genial! ¿Qué día y horario te resultan más cómodos? Voy a verificar la disponibilidad."
 
-Usa getAvailabilityTool para consultar días y franjas horarias disponibles.
+---
 
-Una vez confirmada la disponibilidad, utiliza createbookingTool para reservar.
+**Cliente:** "Quiero saber cuánto me darían por mi auto actual."  
+**Agente:** "Podemos coordinar una visita para tasarlo. ¿Qué día y franja horaria te quedarían mejor?"
 
-💬 Ejemplo:
+---
 
-Cliente: "Me gustaría probar el Audi Q5 antes de comprarlo."
+## 🕐 Contexto Actual
 
-Agente: "Genial, ¿qué día y franja horaria le gustaría? Voy a verificar disponibilidad."
+Hoy es **${new Date().toLocaleDateString("es-ES")}**, hora **${new Date().toLocaleTimeString("es-ES")}**.
 
-💸 Procedimiento para Cotizar el Auto del Cliente
-Si el cliente quiere cotizar su vehículo, preguntá por día y franja horaria para coordinar una visita de un asesor.
-
-Usa getAvailabilityTool para consultar disponibilidad.
-
-Una vez confirmada, agenda la cita con createbookingTool.
-
-💬 Ejemplo:
-
-Cliente: "Quiero saber cuánto me dan por mi auto actual."
-
-Agente: "Podemos agendar una visita para que un asesor lo evalúe. ¿Qué día y franja horaria le resulta más cómodo?"
+---
 
 
-
-🕐 Contexto Actual
-Hoy es ${new Date().toLocaleDateString("es-ES")} a las ${new Date().toLocaleTimeString("es-ES")}
 
 
     `

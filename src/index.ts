@@ -161,8 +161,12 @@ const threadLocks = new Map<string, boolean>();
 
 app.post("/v1/chat/completions", async (req, res) => {
   const { messages, stream } = req.body;
-  const human = messages.at(-1);
-  if (human.role !== "user") {
+  const last_message = messages.at(-1);
+ 
+
+  
+
+  if (last_message.role !== "user") {
     res.write(
       `event: error\ndata: ${JSON.stringify({
         message: "El último mensaje debe ser del usuario",
@@ -180,35 +184,55 @@ app.post("/v1/chat/completions", async (req, res) => {
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
 
-  const heartbeat = setInterval(() => res.write(": ping\n\n"), 15000);
-  const thread_id = "1284";
+    // En tu handler de /chat/completions
+    req.on("close", (e) => {
+      console.log("[SSE] Cliente/proxy cerró la conexión");
+      console.log("[SSE] Close:", e);
+      threadLocks.set(thread_id, false);
+      
+    });
+    res.on("error", (err) => {
+      console.error("[SSE] Error en el stream:", err);
+    });
 
+  const heartbeat = setInterval(() =>     res.write(`: ping\n\n`), 2000);
+
+
+  const thread_id = "149";
   if (threadLocks.get(thread_id)) {
     clearInterval(heartbeat);
-    res.write(
-      `event: error\ndata: ${JSON.stringify({
-        message: "Espera un momento, estoy procesando información",
-      })}\n\n`
-    );
+    // Informamos por SSE y luego cerramos
+    res.write(`event: error\ndata: ${JSON.stringify({
+      message: "Espera un momento, estoy procesando información",
+    })}\n\n`);
     res.write("data: [DONE]\n\n");
+    res.end();
     return;
   }
-  threadLocks.set(thread_id, true);
+ 
 
   try {
     // inyectar ToolMessages faltantes
-    const state = await workflow.getState({ configurable: { thread_id } });
-    const history = state.values.messages || [];
-    console.log("history: ", history);
+  
+     
+    // const state = await workflow.getState({ configurable: { thread_id } });
+    // const history = state.values.messages || [];
+    // console.log("last message of BEFORE invoke: ", history.at(-1)?.content);
 
     // const checked = ensureToolCallsHaveResponses(history);
     // const payload = [...checked, human];
 
     // obtener respuesta
+    console.log("Human message: ", last_message);
+    
     const agentResp = await workflow.invoke(
-      { messages: [...history, human] },
+      { messages: last_message },
       { configurable: { thread_id } }
     );
+
+    // const afterState = await workflow.getState({ configurable: { thread_id } });
+    // const afterHistory = afterState.values.messages || [];
+    // console.log("last message of AFTER invoke: ", afterHistory.at(-1)?.content);
 
     const reply =
       agentResp.messages.at(-1)?.content || "No hay respuesta del agente";
@@ -229,22 +253,14 @@ app.post("/v1/chat/completions", async (req, res) => {
         },
       ],
     };
-
-    res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+    
     console.log("send a elevenlabs");
-
     console.dir(chunk, { depth: null, colors: true });
+    
+    res.write(`data: ${JSON.stringify(chunk)}\n\n`);
     res.write("data: [DONE]\n\n");
-    // En tu handler de /chat/completions
-    req.on("close", (e) => {
-      console.log("[SSE] Cliente/proxy cerró la conexión");
-      console.log("[SSE] Close:", e);
-      
-    });
-    res.on("error", (err) => {
-      console.error("[SSE] Error en el stream:", err);
-    });
-    res.end();
+    // res.end()
+    
   } catch (err) {
     res.write(
       `event: error\ndata: ${JSON.stringify({ message: err.message })}\n\n`
@@ -253,7 +269,7 @@ app.post("/v1/chat/completions", async (req, res) => {
     console.log("Error en /v1/chat/completions:", err);
   } finally {
     clearInterval(heartbeat);
-    threadLocks.set(thread_id, false);
+   
     res.end();
   }
 });

@@ -6,6 +6,14 @@ import { ChatOpenAI } from "@langchain/openai";
 
 import { ToolMessage } from "@langchain/core/messages";
 
+import {
+  ActionRequest,
+  HumanInterruptConfig,
+  HumanInterrupt,
+  HumanResponse,
+} from "@langchain/langgraph/prebuilt";
+import { interrupt } from "@langchain/langgraph";
+
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import path from "path";
@@ -242,6 +250,13 @@ export const getPisos2 = tool(
     superficie_total,
     tipo_operacion,
   }) => {
+
+  
+    console.log("Obteniendo pisos...");
+    console.log(habitaciones, precio_aproximado, zona, piscina, superficie_total);
+    
+    
+
     try {
       // Validación de zona
       if (!zona || zona.trim().length < 2) {
@@ -262,7 +277,9 @@ export const getPisos2 = tool(
         : null;
       const superficieMin = superficieInput ? superficieInput * 0.7 : null;
       const superficieMax = superficieInput ? superficieInput * 1.2 : null;
-
+     
+        
+      
       const response = await fetch(url);
       if (!response.ok) {
         return "Hubo un error al consultar las propiedades. Por favor, intenta nuevamente.";
