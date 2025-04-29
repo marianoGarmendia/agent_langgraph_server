@@ -1,10 +1,10 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { z } from "zod";
-const model = new ChatOpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-    temperature: 0,
-    model: "gpt-4o",
-})
+// const model = new ChatOpenAI({
+//     apiKey: process.env.OPENAI_API_KEY,
+//     temperature: 0,
+//     model: "gpt-4o",
+// })
 
 // {
 //     "marca": "FORD",
@@ -31,3 +31,32 @@ const searchSchema = z.object({
 })
 
 // model.withStructuredOutput()
+
+const test_flow = async () => {
+    const leadToAgent = await fetch(
+      "https://mq0smpw9-3000.brs.devtunnels.ms/v1/messages",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer 1234`,
+        },
+        body: JSON.stringify({
+          nombre: "Mariano",
+          apellido: "Garmendia",
+          number: "5492214371684",
+          message: `Hola Agustin nos nos contactamos desde IMAR para solicitarte algunos datos y avanzar para completar tu consulta `,
+          campos_faltantes: [
+            "Obra_social",
+            "Tipo_de_tratamiento", // Ambulatorio o Internación
+            "Email",
+          ],
+        }),
+      }
+    );
+      console.log(leadToAgent);
+      
+      
+  };
+  
+  await test_flow();

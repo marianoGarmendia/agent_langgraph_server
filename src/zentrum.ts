@@ -110,7 +110,7 @@ const get_cars = tool(
 
     console.dir(primerosCincoAutos, { depth: null });
 
-    const prompt = `Los autos encontrados segun el criterio de siguiente cirterio de búsqueda: modelo: ${modelo} combustible: ${combustible} , Transmision: ${transmision},año ${anio}, 
+    const response = `Los autos encontrados segun el criterio de siguiente cirterio de búsqueda: modelo: ${modelo} combustible: ${combustible} , Transmision: ${transmision},año ${anio}, 
     precio: ${precio_contado?.toString()} 
     
     son: ${JSON.stringify(primerosCincoAutos)}.
@@ -121,16 +121,16 @@ const get_cars = tool(
     de ser necesario utiliza la herramienta: "tavily_search_result" para buscar en internet información adicional sobre el auto seleccionado y la consulta técnica del cliente.
     responde con un mensaje estructurado de buena manera para pasarlo al siguiente nodo de evaluacion por otro modelo llm.`;
 
-    const modelCars = new ChatOpenAI({
-      model: "gpt-4o",
-      apiKey: process.env.ZENTRUM_OPENAI_API_KEY,
-      temperature: 0,
-    }).bindTools([tavilySearch]);
+    // const modelCars = new ChatOpenAI({
+    //   model: "gpt-4o",
+    //   apiKey: process.env.ZENTRUM_OPENAI_API_KEY,
+    //   temperature: 0,
+    // }).bindTools([tavilySearch]);
     try {
-      const response = await modelCars.invoke(prompt);
-      if (!response)
+      // const response = await modelCars.invoke(prompt);
+      if (!primerosCincoAutos)
         return "Estamos teniendo problemas para encontrar autos, por favor intentalo nuevamente mas tarde";
-      return response.content as string;
+      return response;
     } catch (error) {
       console.error("Error al buscar autos:", error);
       throw new Error("Error al buscar autos");
@@ -169,24 +169,27 @@ const get_cars = tool(
 
 const simulacion_de_credito = tool(
   async ({ valor_vehiculo, monto_a_financiar, cuotas }, config) => {
-    const model = new ChatOpenAI({
-      model: "gpt-4o-mini",
-      streaming: true,
-      apiKey: process.env.ZENTRUM_OPENAI_API_KEY,
-      temperature: 0,
-    });
+    // const model = new ChatOpenAI({
+    //   model: "gpt-4o-mini",
+    //   streaming: false,
+    //   apiKey: process.env.ZENTRUM_OPENAI_API_KEY,
+    //   temperature: 0,
 
-    const prompt = `Simula un credito para un auto de ${valor_vehiculo} con un monto a financiar de ${monto_a_financiar} y ${cuotas} cuotas.
+    // });
+
+    const response = `Simula un credito para un auto de ${valor_vehiculo} con un monto a financiar de ${monto_a_financiar} y ${cuotas} cuotas.
      con una tasa referencial de 1,74. 
      En la respuesta incluye la cuota estimada, el monto total a pagar y el monto de intereses.
      aclara abajo lo siguiente: *Los cálculos son referenciales y pueden no coincidir con los reales.
       Calculado con una tasa referencial de 1,74.      
     `;
     try {
-      const response = await model.invoke(prompt);
+      // const response = await model.invoke(prompt);
+
       if (!response)
         return "No se pudo realizar la simulacion del credito, intentalo nuevamente";
-      return response.content as string;
+
+      return response;
     } catch (error) {
       console.error("Error al simular el credito:", error);
       throw new Error("Error al simular el credito");

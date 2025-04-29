@@ -7,17 +7,17 @@ export function buscarAutos(
   const  { modelo, combustible, transmision, anio, precio_contado } = params
 
     // Parsear strings a números de forma segura
-    const anioNum = anio ? Number(anio) : null;
-    const precioContadoNum = precio_contado ? Number(precio_contado) : null;
+    const anioNum = anio && !isNaN(Number(anio)) ? Number(anio) : null;
+const precioContadoNum = precio_contado && !isNaN(Number(precio_contado)) ? Number(precio_contado) : null;
 
-  const modeloInput = modelo.toLowerCase().trim().split(/\s+/);
+  const modeloInput = modelo?.toLowerCase().trim().split(/\s+/);
 
   const autosPuntuados = autos.map((auto) => {
     let score = 0;
 
     // Coincidencia de modelo (parcial y no sensible a mayúsculas)
     const modeloAuto = auto.modelo.toLowerCase();
-    const modeloCoincide = modeloInput.every((palabra) =>
+    const modeloCoincide = modeloInput?.every((palabra) =>
       modeloAuto.includes(palabra)
     );
     if (modeloCoincide) score++;
@@ -36,7 +36,7 @@ export function buscarAutos(
     }
 
     // Año
-    if (!anioNum || auto.anio === anioNum) {
+    if (!anioNum || Number(auto.anio) === anioNum) {
       score++;
     }
 
@@ -47,7 +47,7 @@ export function buscarAutos(
       const rango = 0.1; // 10% de tolerancia
       const min = precioContadoNum * (1 - rango);
       const max = precioContadoNum * (1 + rango);
-      if (auto.precio_contado >= min && auto.precio_contado <= max) {
+      if (Number(auto.precio_contado) >= min && Number(auto.precio_contado) <= max) {
         score++;
       }
     }

@@ -1,10 +1,10 @@
 import {z} from "zod";
 export const autoSchema = z.object({
-    modelo: z.string().min(1, "El modelo es obligatorio").describe("Modelo del vehiculo"),
-    combustible: z.enum(["Gasolina", "Diesel", "Eléctrico"]).nullable().optional(),
-    transmision: z.string().nullable().optional(),
-    anio: z.string().describe("Año del vehiculo, valores validos de ejemplo: 2020, 2021, 2022, 2023"),
-    precio_contado: z.string().describe("Precio de contado del vehiculo, valores validos de ejemplo, no utilizan puntos: 10000, 20000, 30000, 40000, 23990000, 52990000"),
+    modelo: z.string().describe("Modelo del vehiculo").nullable(),
+    combustible: z.enum(["Gasolina", "Diesel", "Eléctrico"]).nullable(),
+    transmision: z.string().nullable(),
+    anio: z.string().describe("Año del vehiculo, valores validos de ejemplo: 2020, 2021, 2022, 2023").nullable(),
+    precio_contado: z.string().describe("Precio de contado del vehiculo, valores validos de ejemplo, no utilizan puntos: 10000, 20000, 30000, 40000, 23990000, 52990000").nullable(),
   });
 
 export type AutoInput = z.infer<typeof autoSchema>;
