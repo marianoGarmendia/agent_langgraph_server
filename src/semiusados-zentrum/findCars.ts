@@ -6,6 +6,10 @@ export function buscarAutos(
 ): { auto: Auto; score: number }[] {
   const  { modelo, combustible, transmision, anio, precio_contado } = params
 
+    // Parsear strings a números de forma segura
+    const anioNum = anio ? Number(anio) : null;
+    const precioContadoNum = precio_contado ? Number(precio_contado) : null;
+
   const modeloInput = modelo.toLowerCase().trim().split(/\s+/);
 
   const autosPuntuados = autos.map((auto) => {
@@ -32,17 +36,17 @@ export function buscarAutos(
     }
 
     // Año
-    if (!anio || auto.anio === anio) {
+    if (!anioNum || auto.anio === anioNum) {
       score++;
     }
 
     // Precio contado
-    if (!precio_contado) {
+    if (!precioContadoNum) {
       score++;
     } else {
       const rango = 0.1; // 10% de tolerancia
-      const min = precio_contado * (1 - rango);
-      const max = precio_contado * (1 + rango);
+      const min = precioContadoNum * (1 - rango);
+      const max = precioContadoNum * (1 + rango);
       if (auto.precio_contado >= min && auto.precio_contado <= max) {
         score++;
       }

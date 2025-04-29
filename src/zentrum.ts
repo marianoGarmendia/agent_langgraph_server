@@ -8,7 +8,7 @@ import {
   type BaseMessageLike,
 } from "@langchain/core/messages";
 import { tool } from "@langchain/core/tools";
-import { z } from "zod";
+import { nullable, z } from "zod";
 import { ChatOpenAI } from "@langchain/openai";
 import { TavilySearchResults } from "@langchain/community/tools/tavily_search";
 import { humanNode } from "./semiusados-zentrum/human-node/human-node";
@@ -27,6 +27,7 @@ import {
   MessagesAnnotation,
 } from "@langchain/langgraph";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
+
 import {
   pdfTool,
   cotizacion,
@@ -56,14 +57,22 @@ const newState = Annotation.Root({
   interruptResponse: Annotation<string>,
 });
 
-const tavilySearch = new TavilySearchAPIRetriever({
-  apiKey: process.env.TAVILY_API_KEY as string,
-  k: 5,
-  searchDepth: "advanced",
-  kwargs: {
-    lang: "es",
-    country: "CL",
-  },
+// const tavilySearch = new TavilySearchAPIRetriever({
+//   apiKey: process.env.TAVILY_API_KEY as string,
+//   k: 5,
+//   searchDepth: "advanced",
+//   kwargs: {
+//     lang: "es",
+//     country: "CL",
+
+//   },
+
+// });
+
+const tavilySearch = new TavilySearchResults({
+  apiKey: process.env.TAVILY_API_KEY,
+  maxResults: 5,
+  searchDepth: "deep",
 });
 
 type AutoInput = z.infer<typeof autoSchema>;
@@ -88,6 +97,7 @@ const get_cars = tool(
     //     toolArgsInterrupt,
     //     semiUsadosZentrum
     //   );
+    console.log("buscando autos");
 
     const autosEncontrados = buscarAutos(
       { modelo, combustible, transmision, anio, precio_contado },
@@ -111,13 +121,13 @@ const get_cars = tool(
     de ser necesario utiliza la herramienta: "tavily_search_result" para buscar en internet información adicional sobre el auto seleccionado y la consulta técnica del cliente.
     responde con un mensaje estructurado de buena manera para pasarlo al siguiente nodo de evaluacion por otro modelo llm.`;
 
-    const model = new ChatOpenAI({
+    const modelCars = new ChatOpenAI({
       model: "gpt-4o",
-      apiKey: process.env.OPENAI_API_KEY,
+      apiKey: process.env.ZENTRUM_OPENAI_API_KEY,
       temperature: 0,
     }).bindTools([tavilySearch]);
     try {
-      const response = await model.invoke(prompt);
+      const response = await modelCars.invoke(prompt);
       if (!response)
         return "Estamos teniendo problemas para encontrar autos, por favor intentalo nuevamente mas tarde";
       return response.content as string;
@@ -131,30 +141,28 @@ const get_cars = tool(
     name: "Catalogo_de_Vehiculos",
     description: `Busca en la base de datos de vehículos seminuevos y devuelve los resultados más relevantes según los criterios proporcionados.`,
     schema: z.object({
-      modelo: z
-        .string()
-        .describe("Modelo del vehículo"),
+      modelo: z.string().describe("Modelo del vehículo"),
       combustible: z
         .enum(["Gasolina", "Diesel", "Eléctrico"])
         .describe(
           "Tipo de combustible del vehículo (Gasolina, Diesel o Eléctrico)"
-        ),
+        )
+        .nullable(),
       transmision: z
         .string()
-        .describe("Tipo de transmisión del vehículo"),
-      anio: z
-        .number()
-        .int()
-        .describe("Año del vehículo"),
+        .describe("Tipo de transmisión del vehículo")
+        .nullable(),
+      anio: z.string().describe("Año del vehículo").nullable(),
       precio_contado: z
-        .number()
-        .int()
-        .describe("Precio de contado aproximado del vehículo"),
+        .string()
+        .describe("Precio de contado aproximado del vehículo")
+        .nullable(),
       query: z
         .string()
         .describe(
           "Consulta o requerimiento técnico del cliente sobre el vehículo"
-        ),
+        )
+        .nullable(),
     }),
   }
 );
@@ -164,7 +172,7 @@ const simulacion_de_credito = tool(
     const model = new ChatOpenAI({
       model: "gpt-4o-mini",
       streaming: true,
-      apiKey: process.env.OPENAI_API_KEY,
+      apiKey: process.env.ZENTRUM_OPENAI_API_KEY,
       temperature: 0,
     });
 
@@ -210,10 +218,10 @@ const tools = [
   zentrum_info_tool,
 ];
 
-export const model = new ChatOpenAI({
+export const llm = new ChatOpenAI({
   model: "gpt-4o",
   streaming: true,
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: process.env.ZENTRUM_OPENAI_API_KEY,
   temperature: 0,
 }).bindTools(tools);
 
@@ -352,7 +360,9 @@ Tu objetivo es **asistir al cliente** en:
 
 ## 🕐 Contexto Actual
 
-Hoy es **${new Date().toLocaleDateString("es-ES")}**, hora **${new Date().toLocaleTimeString("es-ES")}**.
+Hoy es **${new Date().toLocaleDateString(
+      "es-ES"
+    )}**, hora **${new Date().toLocaleTimeString("es-ES")}**.
 
 ---
 
@@ -362,7 +372,7 @@ Hoy es **${new Date().toLocaleDateString("es-ES")}**, hora **${new Date().toLoca
     `
   );
 
-  const response = await model.invoke([systemsMessage, ...messages]);
+  const response = await llm.invoke([systemsMessage, ...messages]);
   console.log("call model");
 
   //   console.log("response: ", response);
