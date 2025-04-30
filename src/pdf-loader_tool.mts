@@ -1,43 +1,43 @@
-import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
-import { OpenAIEmbeddings } from "@langchain/openai";
-import { MemoryVectorStore } from "langchain/vectorstores/memory";
-import { TavilySearchResults } from "@langchain/community/tools/tavily_search";
+// import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
+// import { OpenAIEmbeddings } from "@langchain/openai";
+// import { MemoryVectorStore } from "langchain/vectorstores/memory";
+// import { TavilySearchResults } from "@langchain/community/tools/tavily_search";
 import { ChatOpenAI } from "@langchain/openai";
 
-import { ToolMessage } from "@langchain/core/messages";
+// import { ToolMessage } from "@langchain/core/messages";
 
-import {
-  ActionRequest,
-  HumanInterruptConfig,
-  HumanInterrupt,
-  HumanResponse,
-} from "@langchain/langgraph/prebuilt";
-import { interrupt } from "@langchain/langgraph";
+// import {
+//   ActionRequest,
+//   HumanInterruptConfig,
+//   HumanInterrupt,
+//   HumanResponse,
+// } from "@langchain/langgraph/prebuilt";
+// import { interrupt } from "@langchain/langgraph";
 
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import path from "path";
-import { fileURLToPath } from "url";
-import { dirname } from "path";
+// import path from "path";
+// import { fileURLToPath } from "url";
+// import { dirname } from "path";
 import dotenv from "dotenv";
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+// const __filename = fileURLToPath(import.meta.url);
+// const __dirname = dirname(__filename);
 
 // import { join } from 'path';
 
-const rutaArchivo = path.join(__dirname, "Presentacion_UA_2025.pdf");
+// const rutaArchivo = path.join(__dirname, "Presentacion_UA_2025.pdf");
 
-const loader = new PDFLoader(rutaArchivo);
+// const loader = new PDFLoader(rutaArchivo);
 
-const docs = await loader.load();
+// const docs = await loader.load();
 
-const embeddings = new OpenAIEmbeddings({
-  model: "text-embedding-3-small",
+// const embeddings = new OpenAIEmbeddings({
+//   model: "text-embedding-3-small",
 
-  apiKey: process.env.OPENAI_API_KEY,
-});
+//   apiKey: process.env.OPENAI_API_KEY,
+// });
 
 // const llmGroq = new ChatGroq({
 //   model: "llama-3.3-70b-versatile",
@@ -54,38 +54,38 @@ const model = new ChatOpenAI({
   temperature: 0,
 });
 
-export const pdfTool = tool(
-  async ({ query }) => {
-    const vectorStore = new MemoryVectorStore(embeddings);
-    await vectorStore.addDocuments(docs);
+// export const pdfTool = tool(
+//   async ({ query }) => {
+//     const vectorStore = new MemoryVectorStore(embeddings);
+//     await vectorStore.addDocuments(docs);
 
-    const retriever = vectorStore.asRetriever({
-      k: 5,
-    });
-    const docsFound = await retriever.invoke(query);
-    console.dir(docsFound, { depth: null });
+//     const retriever = vectorStore.asRetriever({
+//       k: 5,
+//     });
+//     const docsFound = await retriever.invoke(query);
+//     console.dir(docsFound, { depth: null });
 
-    const content = docsFound.map((doc) => doc.pageContent);
-    const texto = content.join(" ");
-    return texto;
-  },
-  {
-    name: "universal_info_2025",
-    description:
-      "Obtiene informacion de Universal Assistance actualizada de 2025",
-    schema: z.object({
-      query: z
-        .string()
-        .describe(
-          "Consulta a realizar sobre el contenido del documento que contiene la informacion de Universal Assistance 2025"
-        ),
-    }),
-  }
-);
+//     const content = docsFound.map((doc:any) => doc.pageContent);
+//     const texto = content.join(" ");
+//     return texto;
+//   },
+//   {
+//     name: "universal_info_2025",
+//     description:
+//       "Obtiene informacion de Universal Assistance actualizada de 2025",
+//     schema: z.object({
+//       query: z
+//         .string()
+//         .describe(
+//           "Consulta a realizar sobre el contenido del documento que contiene la informacion de Universal Assistance 2025"
+//         ),
+//     }),
+//   }
+// );
 
-const tavilySearch = new TavilySearchResults({
-  apiKey: process.env.TAVILY_API_KEY,
-});
+// const tavilySearch = new TavilySearchResults({
+//   apiKey: process.env.TAVILY_API_KEY,
+// });
 
 // Herramienta de simulacion de Cotizacion de viajes
 
@@ -170,74 +170,74 @@ Si necesitas más información sobre algún beneficio en particular o deseas rea
 const url =
   "https://propiedades_test.techbank.ai:4002/public/productos?limit=100";
 
-const getPisos = tool(
-  async ({
-    habitaciones,
-    precio_aproximado,
-    zona,
-    piscina,
-    superficie_total,
-  }) => {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Error: ${response.statusText}`);
-    }
-    let pisos_found: any[] = [];
-    const pisos = await response.json();
-    pisos.forEach((piso) => {
-      const props = piso.PRODUCT_PROPS;
-      pisos_found.push(props);
-    });
+// const getPisos = tool(
+//   async ({
+//     habitaciones,
+//     precio_aproximado,
+//     zona,
+//     piscina,
+//     superficie_total,
+//   }) => {
+//     const response = await fetch(url);
+//     if (!response.ok) {
+//       throw new Error(`Error: ${response.statusText}`);
+//     }
+//     let pisos_found: any[] = [];
+//     const pisos = await response.json();
+//     pisos.forEach((piso:any) => {
+//       const props = piso.PRODUCT_PROPS;
+//       pisos_found.push(props);
+//     });
 
-    const cadenaJson = JSON.stringify(pisos_found);
-    const prompt2 = `Segun los siguientes parametros: ${habitaciones} habitaciones, - $${precio_aproximado} precio aproximado, zona:  ${zona} , piscina: ${piscina} , ${superficie_total} superficie total, dame una lista de propiedades disponibles en el sistema.
-        Estos son todos los pisos encontrados:
+//     const cadenaJson = JSON.stringify(pisos_found);
+//     const prompt2 = `Segun los siguientes parametros: ${habitaciones} habitaciones, - $${precio_aproximado} precio aproximado, zona:  ${zona} , piscina: ${piscina} , ${superficie_total} superficie total, dame una lista de propiedades disponibles en el sistema.
+//         Estos son todos los pisos encontrados:
         
-        ${cadenaJson}
+//         ${cadenaJson}
         
-        ### INSTRUCCIONES DE RESPUESTA:
-        - Si no encontras una propiedad que cumpla con los 5 los requisitos, sugiere una propiedad que cumpla con 4 requisitos
-        - Si no encontras una propiedad que cumpla con 4 requisitos, sugiere una propiedad que cumpla con 3 requisitos
-        - Si no encontras una propiedad que cumpla con 3 requisitos, sugiere una propiedad que cumpla con 2 requisitos
-        - Si no encontras una propiedad que cumpla con 2 requisitos, sugiere una propiedad que cumpla con 1 requisito
-        - Si no encontras una propiedad que cumpla con 1 requisito, dile que por el momento no hay propiedades disponibles segun sus requisitos
+//         ### INSTRUCCIONES DE RESPUESTA:
+//         - Si no encontras una propiedad que cumpla con los 5 los requisitos, sugiere una propiedad que cumpla con 4 requisitos
+//         - Si no encontras una propiedad que cumpla con 4 requisitos, sugiere una propiedad que cumpla con 3 requisitos
+//         - Si no encontras una propiedad que cumpla con 3 requisitos, sugiere una propiedad que cumpla con 2 requisitos
+//         - Si no encontras una propiedad que cumpla con 2 requisitos, sugiere una propiedad que cumpla con 1 requisito
+//         - Si no encontras una propiedad que cumpla con 1 requisito, dile que por el momento no hay propiedades disponibles segun sus requisitos
 
-        - El precio de la propiedad no puede estar alejado del precio aproximado que el usuario ha solicitado ( unos 10% de diferencia maximo)
-        - la superficie total no puede estar alejada de la superficie total que el usuario ha solicitado ( unos 10% de diferencia maximo)
-        - la cantidad de habitaciones no puede estar alejada de la cantidad de habitaciones que el usuario ha solicitado ( unos 10% de diferencia maximo)
-        - la zona no puede estar alejada de la zona que el usuario ha solicitado ( unos 10 km maximo)
+//         - El precio de la propiedad no puede estar alejado del precio aproximado que el usuario ha solicitado ( unos 10% de diferencia maximo)
+//         - la superficie total no puede estar alejada de la superficie total que el usuario ha solicitado ( unos 10% de diferencia maximo)
+//         - la cantidad de habitaciones no puede estar alejada de la cantidad de habitaciones que el usuario ha solicitado ( unos 10% de diferencia maximo)
+//         - la zona no puede estar alejada de la zona que el usuario ha solicitado ( unos 10 km maximo)
 
-        Evalua los requisitos y responde con la propiedad mas acorde a los requisitos que el usuario ha solicitado, si no hay propiedades disponibles, responde que no hay propiedades disponibles segun sus requisitos.
+//         Evalua los requisitos y responde con la propiedad mas acorde a los requisitos que el usuario ha solicitado, si no hay propiedades disponibles, responde que no hay propiedades disponibles segun sus requisitos.
         
 
-        `;
+//         `;
 
-    const res = await model.invoke(prompt2);
+//     const res = await model.invoke(prompt2);
 
-    console.log("res: ", res.content);
+//     console.log("res: ", res.content);
 
-    return res.content;
-  },
-  {
-    name: "Obtener_pisos_en_venta",
-    description: "Obtiene una lista de propiedades disponibles en el sistema",
-    schema: z.object({
-      habitaciones: z
-        .string()
-        .describe("Numero de habitaciones de la propiedad"),
-      precio_aproximado: z
-        .string()
-        .describe("Precio aproximado de la propiedad"),
-      zona: z.string().describe("Zona de la propiedad"),
-      superficie_total: z
-        .string()
-        .describe("Superficie total de la propiedad que busca"),
-      piscina: z
-        .string()
-        .describe("Si busca piscina o no, la palabra de ser si o no"),
-    }),
-  }
-);
+//     return res.content;
+//   },
+//   {
+//     name: "Obtener_pisos_en_venta",
+//     description: "Obtiene una lista de propiedades disponibles en el sistema",
+//     schema: z.object({
+//       habitaciones: z
+//         .string()
+//         .describe("Numero de habitaciones de la propiedad"),
+//       precio_aproximado: z
+//         .string()
+//         .describe("Precio aproximado de la propiedad"),
+//       zona: z.string().describe("Zona de la propiedad"),
+//       superficie_total: z
+//         .string()
+//         .describe("Superficie total de la propiedad que busca"),
+//       piscina: z
+//         .string()
+//         .describe("Si busca piscina o no, la palabra de ser si o no"),
+//     }),
+//   }
+// );
 
 
 
@@ -288,15 +288,15 @@ export const getPisos2 = tool(
       const pisos = await response.json();
 
       const pisos_filtrables = pisos
-        .map((p) => p.PRODUCT_PROPS)
-        .filter((p) => {
+        .map((p:any) => p.PRODUCT_PROPS)
+        .filter((p:any) => {
           const estado_ok = p.estado?.toLowerCase() !== "no disponible";
           const operacion_ok =
             p.tipo_operacion?.toLowerCase() === tipo_operacion.toLowerCase();
           return estado_ok && operacion_ok;
         });
 
-      const pisosPuntuados = pisos_filtrables.map((piso) => {
+      const pisosPuntuados = pisos_filtrables.map((piso:any) => {
         let score = 0;
 
         // Habitaciones
@@ -343,12 +343,12 @@ export const getPisos2 = tool(
 
       for (let minScore = 5; minScore >= 2; minScore--) {
         const matches = pisosPuntuados
-          .filter(({ score }) => score === minScore)
-          .map(({ piso }) => piso);
+          .filter(({ score }:{score:any}) => score === minScore)
+          .map(({ piso }:{piso:any}) => piso);
 
         if (matches.length > 0) {
           return matches
-            .map((p) => {
+            .map((p:any) => {
               return `
             Ciudad: ${p.ciudad || "Sin dato"}
             Ubicación: ${p.ubicacion || p.zona || "Sin dato"}
